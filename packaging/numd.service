@@ -1,0 +1,17 @@
+[Unit]
+Description=numd numpad shortcut layer
+Documentation=https://github.com/cheeseonamonkey/numd
+After=systemd-udevd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/numd /etc/numd/config.ini
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

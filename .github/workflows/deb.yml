@@ -1,0 +1,43 @@
+name: Debian package
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deb:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: '2.2.12'
+      - name: Unit tests
+        run: nim c -r --hints:off --out:build/core-tests tests/test_core.nim
+      - name: Compile
+        run: nim c -d:release --hints:off --out:build/numd src/numd.nim
+      - name: Validate default configuration
+        run: build/numd --check config/numd.ini
+      - name: Package
+        run: |
+          version=0.1.0
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then version="$(printf '%s' "$GITHUB_REF_NAME" | sed 's/^v//')"; fi
+          bash packaging/build-deb.sh "$version"
+          dpkg-deb --info dist/*.deb
+          dpkg-deb --contents dist/*.deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: numd-deb
+          path: dist/*.deb
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.deb
