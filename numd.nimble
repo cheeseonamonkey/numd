@@ -3,10 +3,11 @@ author      = "cheeseonamonkey"
 description = "Configurable Num Lock modifier and numpad shortcut daemon"
 license     = "MIT"
 srcDir      = "src"
-bin         = @["numd"]
+bin         = @["numd", "numd-config"]
 backend     = "c"
 
 requires "nim >= 2.2.0"
+requires "ngum >= 0.3.0"
 
 task test, "run unit tests":
   exec "nim c -r --hints:off --out:build/core-tests tests/test_core.nim"
