@@ -1,7 +1,8 @@
-## Linux evdev -> uinput numpad layer. Standard library only.
-import std/[os, strutils, algorithm, tables]
+## Linux evdev -> uinput numpad layer and command-line management interface.
+import std/[os, strutils, algorithm, tables, osproc]
 import posix
 import core
+import numdconfig
 
 const
   EvKey = 1'u16
@@ -123,27 +124,123 @@ proc run(settings: Settings) =
     stderr.writeLine("numd: keyboard disconnected; reconnecting")
     sleep(500)
 
-when isMainModule:
-  let args = commandLineParams()
-  if args.len > 0 and args[0] in ["-h", "--help"]:
-    echo "Usage: numd [--check] [config-path]"
-    echo "Default: /etc/numd/config.ini"
-    quit(0)
-  if args.len > 0 and args[0] == "--version":
+proc usage() =
+  echo """numd — Num Lock numpad shortcuts
+
+Usage:
+  numd setup                 configure and enable the system service
+  numd config [config-file]  edit bindings in the ngum TUI
+  numd status                show daemon status
+  numd start|stop|restart    control the service
+  numd enable|disable        enable/disable service at boot
+  numd logs                  follow service logs
+  numd devices               list keyboard devices
+  numd check [config-file]   validate configuration
+  numd run [config-file]     run the daemon in the foreground
+  numd help
+
+Run `sudo numd setup` once after installing the package.
+"""
+
+proc systemctl(args: seq[string]): int =
+  if findExe("systemctl").len == 0:
+    raise newException(IOError, "systemctl not found; this command requires systemd")
+  let process = startProcess("systemctl", args = args,
+                             options = {poUsePath, poParentStreams})
+  result = process.waitForExit()
+  process.close()
+
+proc listDevices() =
+  var found = false
+  for directory in ["/dev/input/by-id", "/dev/input/by-path"]:
+    if not dirExists(directory): continue
+    for _, path in walkDir(directory):
+      if path.endsWith("-event-kbd"):
+        echo path
+        found = true
+  if not found:
+    echo "No keyboard symlinks found under /dev/input/by-id or /dev/input/by-path."
+
+proc checkConfig(path: string) =
+  let settings = loadSettings(path)
+  if settings.device != "auto" and not settings.device.isAbsolute:
+    raise newException(ValueError, "device.path must be absolute or auto")
+  echo "OK: ", settings.bindings.len, " bindings, device=", settings.device
+
+proc runSetup() =
+  if geteuid() != 0:
+    raise newException(IOError, "setup needs root; run: sudo numd setup")
+  if not fileExists("/etc/numd/config.ini"):
+    raise newException(IOError, "missing /etc/numd/config.ini; reinstall the numd package")
+  if not fileExists("/usr/lib/systemd/system/numd.service") and
+     not fileExists("/etc/systemd/system/numd.service"):
+    raise newException(IOError, "service unit missing; install the numd package first")
+
+  if not runTui("/etc/numd/config.ini"):
+    echo "Setup cancelled; service unchanged."
+    return
+
+  if not fileExists("/dev/uinput"):
+    if findExe("modprobe").len == 0:
+      raise newException(IOError, "modprobe not found; load the uinput module manually")
+    let moduleLoad = startProcess("modprobe", args = ["uinput"],
+                                  options = {poUsePath, poParentStreams})
+    let status = moduleLoad.waitForExit()
+    moduleLoad.close()
+    if status != 0 or not fileExists("/dev/uinput"):
+      raise newException(IOError, "could not load uinput kernel module")
+
+  if systemctl(@["daemon-reload"]) != 0 or
+     systemctl(@["enable", "--now", "numd"]) != 0:
+    raise newException(IOError, "systemd setup failed; inspect `systemctl status numd`")
+  echo "numd is enabled and running. Hold Num Lock and press a configured numpad key."
+
+proc main(args: seq[string]) =
+  if args.len == 0 or args[0] in ["help", "-h", "--help"]:
+    usage()
+    return
+  if args[0] in ["version", "--version"]:
     echo "numd 0.1.0"
-    quit(0)
-  let checkOnly = args.len > 0 and args[0] == "--check"
-  let configPath = if args.len > (if checkOnly: 1 else: 0):
-                     args[if checkOnly: 1 else: 0]
-                   else: "/etc/numd/config.ini"
-  try:
-    let settings = loadSettings(configPath)
-    if settings.device != "auto" and not settings.device.isAbsolute:
-      raise newException(ValueError, "device.path must be absolute or auto")
-    if checkOnly:
-      echo "OK: ", settings.bindings.len, " bindings, device=", settings.device
+    return
+
+  let command = args[0]
+  let config = if args.len > 1: args[1] else: "/etc/numd/config.ini"
+  case command
+  of "setup":
+    runSetup()
+  of "config":
+    if config == "/etc/numd/config.ini" and geteuid() != 0:
+      raise newException(IOError, "editing the system config needs root; run: sudo numd config")
+    if runTui(config) and config == "/etc/numd/config.ini" and
+       systemctl(@["is-active", "--quiet", "numd"]) == 0:
+      discard systemctl(@["restart", "numd"])
+      echo "Service restarted with the saved configuration."
+  of "check", "--check":
+    checkConfig(config)
+  of "run":
+    run(loadSettings(config))
+  of "devices":
+    listDevices()
+  of "status":
+    quit(systemctl(@["status", "--no-pager", "numd"]))
+  of "logs":
+    if findExe("journalctl").len == 0:
+      raise newException(IOError, "journalctl not found")
+    let process = startProcess("journalctl", args = @["-u", "numd", "-f"],
+                               options = {poUsePath, poParentStreams})
+    quit(process.waitForExit())
+  of "start", "stop", "restart", "enable", "disable":
+    quit(systemctl(@[command, "numd"]))
+  else:
+    # Keep the old `numd [config-file]` invocation working for existing units.
+    if command.isAbsolute:
+      run(loadSettings(command))
     else:
-      run(settings)
-  except CatchableError as e:
-    stderr.writeLine("numd: " & e.msg)
+      raise newException(ValueError, "unknown command: " & command & " (try `numd help`)")
+
+when isMainModule:
+  try:
+    main(commandLineParams())
+  except CatchableError as error:
+    stderr.writeLine("numd: " & error.msg)
     quit(1)

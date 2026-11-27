@@ -8,6 +8,12 @@ stage="build/pkg"
 mkdir -p dist
 rm -rf "$stage"
 install -Dm755 build/numd "$stage/usr/bin/numd"
+ngum_bin="$(command -v ngum || true)"
+if [[ -z "$ngum_bin" ]]; then
+  echo "ngum is required to package the numd config TUI" >&2
+  exit 1
+fi
+install -Dm755 "$ngum_bin" "$stage/usr/lib/numd/ngum"
 install -Dm644 config/numd.ini "$stage/etc/numd/config.ini"
 install -Dm644 packaging/numd.service "$stage/usr/lib/systemd/system/numd.service"
 mkdir -p "$stage/DEBIAN"

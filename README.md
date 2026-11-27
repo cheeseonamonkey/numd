@@ -1,6 +1,6 @@
 # numd
 
-**Num Lock as a numpad modifier.** A small Linux evdev/uinput daemon written in Nim, with no third-party runtime dependencies.
+**Num Lock as a numpad modifier.** A small Linux evdev/uinput daemon in Nim with one CLI for setup, configuration, and service management.
 
 - **Tap Num Lock** → ordinary Num Lock toggle.
 - **Hold Num Lock + numpad key** → configured keyboard shortcut.
@@ -44,33 +44,39 @@ one physical keyboard is handled per daemon instance.
 ## Debian/Ubuntu install
 
 Download the `.deb` from [CI artifacts](../../actions/workflows/deb.yml)
-or [Releases](../../releases).
+or [Releases](../../releases), then install and run the setup wizard:
 
 ```sh
 sudo apt install ./numd_*.deb
-sudoedit /etc/numd/config.ini
-numd --check /etc/numd/config.ini
-sudo modprobe uinput  # only if /dev/uinput is missing
-sudo systemctl enable --now numd
-journalctl -u numd -f
+sudo numd setup
 ```
 
-The package deliberately **does not enable/start** the service at install.
-The service uses root for evdev input access and uinput device creation;
-it grabs the physical keyboard exclusively. Avoid running another remapper
-against the same device.
+`numd setup` opens the ngum configuration TUI, loads `uinput` if needed,
+then enables and starts the system service. The package bundles ngum for the
+TUI; no separate TUI install is needed.
 
-After editing config, run `numd --check` and `sudo systemctl restart numd`.
+```sh
+numd status
+numd config                 # edit bindings; restarts active service on save
+numd logs                   # follow service journal
+numd start|stop|restart
+numd enable|disable
+numd devices
+```
+
+The service runs as root because it needs evdev/uinput access and exclusively
+grabs the selected physical keyboard. Do not run another remapper against the
+same device. `numd` with no arguments prints help; run the daemon directly
+with `sudo numd run [config-file]`.
 
 ## Build/test
 
-Requires Nim 2.2+, a C compiler, Linux headers, and dpkg tools:
+Requires Nim 2.2+, a C compiler, Linux headers, dpkg tools, and the ngum
+executable on the build machine:
 
 ```sh
-nim c -r --out:build/core-tests tests/test_core.nim
-nim c -d:release --out:build/numd src/numd.nim
-build/numd --check config/numd.ini
-bash packaging/build-deb.sh 0.1.0
+nimble test
+nimble dist
 ```
 
 CI tests, compiles, and publishes an amd64 Debian package as an artifact;
