@@ -1,0 +1,10 @@
+Package: numd
+Version: 0.1.0
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: cheeseonamonkey <noreply@github.com>
+Depends: libc6 (>= 2.35)
+Description: Configurable Num Lock modifier and numpad shortcut daemon
+ A lightweight Nim evdev/uinput remapper that preserves ordinary numpad input
+ and sends customizable keyboard shortcuts when Num Lock is held.
